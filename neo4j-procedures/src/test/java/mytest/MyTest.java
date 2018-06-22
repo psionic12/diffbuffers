@@ -27,6 +27,30 @@ public class MyTest {
         }
     };
 
+<<<<<<< HEAD
+=======
+    static class TestClass {
+
+    }
+
+    private enum TestClasses implements TestClassInterface {
+        A, B
+    }
+
+    interface TestClassInterface {
+
+    }
+
+    private void test(TestClassInterface instance) {
+
+    }
+
+    @Test
+    public void test2() {
+        test(TestClasses.A);
+    }
+
+>>>>>>> 1d1b9081f02b553f339021cfb3294902895cd828
 
 
     @Test
@@ -35,11 +59,18 @@ public class MyTest {
             session.writeTransaction(new TransactionWork<Void>() {
                 @Override
                 public Void execute(Transaction tx) {
+<<<<<<< HEAD
 //                    StatementResult result = tx.run(
 //                            "create (a:PERSON)" +
 //                                    "set a.name = \"Tom Hanks\" "
 //                    );
                     session.
+=======
+                    StatementResult result = tx.run(
+                            "create (a:PERSON)" +
+                                    "set a.name = \"Tom Hanks\" "
+                    );
+>>>>>>> 1d1b9081f02b553f339021cfb3294902895cd828
                     return null;
                 }
             });

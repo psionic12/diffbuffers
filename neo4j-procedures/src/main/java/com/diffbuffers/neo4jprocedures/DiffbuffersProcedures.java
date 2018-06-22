@@ -9,6 +9,7 @@ import org.neo4j.procedure.Procedure;
 
 public class DiffbuffersProcedures {
 
+<<<<<<< HEAD
     private static enum Relationships implements RelationshipType {
         IS_A,
         HAS_A,
@@ -20,6 +21,19 @@ public class DiffbuffersProcedures {
     private static enum NodeTypes implements Label {
         ENTITIY, STRUCT, NAMESPACE, STRING, ARRAY,
         BOOL, INT8, UINT8, INT16, UINT16, INT32, UINT32, INT64, UINT64, FLOAT32, FLOAT64
+=======
+    private static enum BASIC_TYPES implements Label
+    {
+        CLASS,
+        INT,
+        FLOAT,
+        UINT8
+    }
+
+    private static enum RelTypes implements RelationshipType
+    {
+        KNOWS
+>>>>>>> 1d1b9081f02b553f339021cfb3294902895cd828
     }
 
 
@@ -32,6 +46,7 @@ public class DiffbuffersProcedures {
     @Procedure (name = "dbf.init", mode = Mode.WRITE)
     public void init() {
         try(Transaction tx = mService.beginTx()) {
+<<<<<<< HEAD
             try {
                 mService.getNodeById(0);
                 // if there's any node exits, that means this is not a empty graph
@@ -54,6 +69,12 @@ public class DiffbuffersProcedures {
                 tx.success();
             }
 
+=======
+            Node classNode = mService.createNode();
+            classNode.addLabel(BASIC_TYPES.CLASS);
+            Node node = mService.createNode();
+            classNode.createRelationshipTo(node, RelTypes.KNOWS);
+>>>>>>> 1d1b9081f02b553f339021cfb3294902895cd828
         }
     }
 }
