@@ -4,12 +4,12 @@ import org.neo4j.graphdb.*;
 import org.neo4j.logging.Log;
 import org.neo4j.procedure.Context;
 import org.neo4j.procedure.Mode;
-import org.neo4j.procedure.Name;
 import org.neo4j.procedure.Procedure;
+
+import java.util.stream.Stream;
 
 public class DiffbuffersProcedures {
 
-<<<<<<< HEAD
     private static enum Relationships implements RelationshipType {
         IS_A,
         HAS_A,
@@ -19,21 +19,23 @@ public class DiffbuffersProcedures {
     }
 
     private static enum NodeTypes implements Label {
-        ENTITIY, STRUCT, NAMESPACE, STRING, ARRAY,
+        GROUP, STRUCT, NAMESPACE, STRING, ARRAY,
         BOOL, INT8, UINT8, INT16, UINT16, INT32, UINT32, INT64, UINT64, FLOAT32, FLOAT64
-=======
-    private static enum BASIC_TYPES implements Label
-    {
-        CLASS,
-        INT,
-        FLOAT,
-        UINT8
     }
 
-    private static enum RelTypes implements RelationshipType
-    {
-        KNOWS
->>>>>>> 1d1b9081f02b553f339021cfb3294902895cd828
+    public static class GeneralResult {
+        public boolean isok;
+        public String message;
+
+        public GeneralResult(boolean isok, String msg) {
+            this.isok = isok;
+            message = msg;
+        }
+
+        public GeneralResult(boolean isok) {
+            this.isok = isok;
+            message = null;
+        }
     }
 
 
@@ -43,16 +45,14 @@ public class DiffbuffersProcedures {
     @Context
     public Log mLog;
 
-    @Procedure (name = "dbf.init", mode = Mode.WRITE)
-    public void init() {
-        try(Transaction tx = mService.beginTx()) {
-<<<<<<< HEAD
-            try {
-                mService.getNodeById(0);
-                // if there's any node exits, that means this is not a empty graph
-                mLog.error("init failed: the graph is not empty");
-                tx.failure();
-            } catch (NotFoundException e) {
+    @Procedure(name = "dbf.init", mode = Mode.WRITE)
+    public Stream<GeneralResult> init() {
+        try {
+            mService.getNodeById(0);
+            // if there's any node exits, that means this is not a empty graph
+            return Stream.of(new GeneralResult(false, "init failed: the graph is not empty"));
+        } catch (NotFoundException ne) {
+            try (Transaction tx = mService.beginTx()) {
                 // create basic nodes
                 Node nodeBOOL = mService.createNode(NodeTypes.BOOL);
                 Node nodeINT8 = mService.createNode(NodeTypes.INT8);
@@ -65,16 +65,11 @@ public class DiffbuffersProcedures {
                 Node nodeUINT64 = mService.createNode(NodeTypes.UINT64);
                 Node nodeFLOAT32 = mService.createNode(NodeTypes.FLOAT32);
                 Node nodeFLOAT64 = mService.createNode(NodeTypes.FLOAT64);
-
                 tx.success();
+                return Stream.of(new GeneralResult(true, "success"));
+            } catch (Exception e) {
+                return Stream.of(new GeneralResult(false, e.getMessage()));
             }
-
-=======
-            Node classNode = mService.createNode();
-            classNode.addLabel(BASIC_TYPES.CLASS);
-            Node node = mService.createNode();
-            classNode.createRelationshipTo(node, RelTypes.KNOWS);
->>>>>>> 1d1b9081f02b553f339021cfb3294902895cd828
         }
     }
 }
