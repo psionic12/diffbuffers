@@ -6,8 +6,8 @@ import org.junit.Test;
 import org.neo4j.driver.v1.*;
 import org.neo4j.harness.junit.Neo4jRule;
 
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.neo4j.driver.v1.Values.parameters;
 
 public class TestWithHarness {
     @ClassRule
@@ -19,22 +19,30 @@ public class TestWithHarness {
 
             Session session = driver.session();
 
-            session.run("CREATE (p {name:\"junk\"})");
+            try (Transaction tx = session.beginTransaction()) {
 
-            Record record = session.run("CALL dbf.init()").single();
+                tx.run("CALL dbf.initSchema()");
+                tx.success();
+            }
 
-            assertFalse(record.get("message").asString(), record.get("isok").asBoolean());
 
-            session.run("MATCH (p) DETACH DELETE p");
+            try (Transaction tx = session.beginTransaction()) {
+                tx.run("CALL dbf.init()");
 
-            record = session.run("CALL dbf.init()").single();
+                StatementResult results = tx.run("MATCH (p:UINT8) RETURN p");
+                tx.success();
 
-            assertTrue(record.get("message").asString(), record.get("isok").asBoolean());
+                assertTrue(results.keys().size() != 0);
 
-            StatementResult results = session.run("MATCH (p:UINT8) RETURN p");
+            }
+        }
+    }
 
-            assertTrue(results.keys().size() != 0);
-
+    @Test
+    public void createClassTest() {
+        try (Driver driver = GraphDatabase.driver(sNeo4j.boltURI(), Config.build().withoutEncryption().toConfig())) {
+            Session session = driver.session();
+            session.run("CALL dbf.createClass()", parameters());
         }
     }
 }
