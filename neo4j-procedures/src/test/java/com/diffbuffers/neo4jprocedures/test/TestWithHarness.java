@@ -1,6 +1,7 @@
 package com.diffbuffers.neo4jprocedures.test;
 
-import com.diffbuffers.neo4jprocedures.DiffbuffersProcedures;
+import com.diffbuffers.neo4jprocedures.*;
+import com.diffbuffers.neo4jprocedures.Records;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.neo4j.driver.v1.*;
@@ -33,10 +34,20 @@ public class TestWithHarness {
                 tx.success();
 
                 assertTrue(results.keys().size() != 0);
-
             }
-        }
-    }
+
+            try (Transaction tx = session.beginTransaction()) {
+                int parent = tx.run("MATCH (p:DEFAULT_CLASS) RETURN ID(p) as id").single().get("id").asInt();
+                int space = tx.run("MATCH (p:DEFAULT_NAMESPACE) RETURN ID(p) as id").single().get("id").asInt();
+                Record record = tx.run("CALL dbf.createClass({name}, {parent}, {namespace})",
+                        parameters("name", "TestClass",
+                                "parent", parent, "namespace", space)).single();
+                tx.success();
+                for (String key: record.asMap().keySet()) {
+                    System.out.println(key + ":" + record.get(key));
+                }
+            }
+
 
     @Test
     public void createClassTest() {
