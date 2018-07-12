@@ -1,8 +1,9 @@
 package com.diffbuffers.neo4jprocedures;
 
-import org.neo4j.cypher.InvalidArgumentException;
 import org.neo4j.graphdb.*;
 import org.neo4j.graphdb.schema.Schema;
+import org.neo4j.graphdb.traversal.Evaluators;
+import org.neo4j.graphdb.traversal.Traverser;
 import org.neo4j.logging.Log;
 import org.neo4j.procedure.Context;
 import org.neo4j.procedure.Mode;
@@ -10,11 +11,14 @@ import org.neo4j.procedure.Name;
 import org.neo4j.procedure.Procedure;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.stream.Stream;
 
-import static com.diffbuffers.neo4jprocedures.ClassesRelationships.BELONGS_TO;
-import static com.diffbuffers.neo4jprocedures.ClassesRelationships.IS_A;
-import static com.diffbuffers.neo4jprocedures.NodeTypes.NON_ABSTRACT;
+import static com.diffbuffers.neo4jprocedures.NodeLabel.CLASS;
+import static com.diffbuffers.neo4jprocedures.NodeRelationship.BELONGS_TO;
+import static com.diffbuffers.neo4jprocedures.NodeRelationship.IS_A;
+import static com.diffbuffers.neo4jprocedures.NodeLabel.NON_ABSTRACT;
+import static com.diffbuffers.neo4jprocedures.NodeRelationship.getFieldRelationByType;
 
 public class DiffbuffersProcedures {
 
@@ -45,18 +49,31 @@ public class DiffbuffersProcedures {
             try (Transaction tx = mService.beginTx()) {
 
                 // create basic nodes
-                Node basicType = mService.createNode(NodeTypes.BASIC_TYPE);
+                mService.createNode(NodeLabel.ARRAY);
+                mService.createNode(NodeLabel.BOOL);
+                mService.createNode(NodeLabel.INT8);
+                mService.createNode(NodeLabel.UINT8);
+                mService.createNode(NodeLabel.INT16);
+                mService.createNode(NodeLabel.UINT16);
+                mService.createNode(NodeLabel.INT32);
+                mService.createNode(NodeLabel.UINT32);
+                mService.createNode(NodeLabel.INT64);
+                mService.createNode(NodeLabel.UINT64);
+                mService.createNode(NodeLabel.FLOAT32);
+                mService.createNode(NodeLabel.FLOAT64);
 
                 // default NAME space;
-                Node defaultNameSpace = mService.createNode(NodeTypes.NAMESPACE);
+                Node defaultNameSpace = mService.createNode(NodeLabel.NAMESPACE);
                 defaultNameSpace.setProperty(Records.NameSpaceRecord.NAME, defaultNamespaceName);
-                defaultNameSpace.addLabel(NodeTypes.DEFAULT_NAMESPACE);
+                defaultNameSpace.addLabel(NodeLabel.DEFAULT_NAMESPACE);
 
                 // super class for all class type
-                Node defaultSuperClass = mService.createNode(NodeTypes.CLASS);
+                Node defaultSuperClass = mService.createNode(NodeLabel.CLASS);
                 defaultSuperClass.setProperty(Records.ClassRecord.NAME, defaultSuperClassName);
                 defaultSuperClass.createRelationshipTo(defaultNameSpace, BELONGS_TO);
-                defaultSuperClass.addLabel(NodeTypes.DEFAULT_CLASS);
+                defaultSuperClass.addLabel(NodeLabel.DEFAULT_CLASS);
+                defaultSuperClass.createRelationshipTo(mService.createNode(NodeLabel.INIT_LIST),
+                        NodeRelationship.HAS_CONSTRUCTOR_ARGS);
 
                 tx.success();
             }
@@ -70,25 +87,52 @@ public class DiffbuffersProcedures {
                                                    @Name(value = "abstract", defaultValue = "false") boolean isAbstract) {
         Records.ClassRecord classRecord = new Records.ClassRecord();
         try (Transaction tx = mService.beginTx()) {
-
-            Node node = mService.createNode(NodeTypes.CLASS);
-            classRecord.nodeId = node.getId();
+            Node space = mService.getNodeById(nameSpaceId);
+            Node superType = mService.getNodeById(superTypeId);
+            if (!isUniqueInSpace(className, space)) {
+                throw new IllegalArgumentException(className + " has already defined in name space: "
+                        + space.getProperty(Records.NameSpaceRecord.NAME));
+            }
+            Node node = mService.createNode(NodeLabel.CLASS);
             node.setProperty(Records.ClassRecord.NAME, className);
             classRecord.name = className;
-            node.createRelationshipTo(mService.getNodeById(superTypeId), IS_A);
-            node.createRelationshipTo(mService.getNodeById(nameSpaceId), BELONGS_TO);
+            node.createRelationshipTo(superType, IS_A);
+            node.createRelationshipTo(space, BELONGS_TO);
+            node.createRelationshipTo(mService.createNode(NodeLabel.INIT_LIST), NodeRelationship.HAS_CONSTRUCTOR_ARGS);
             if (!isAbstract) {
                 ArrayList<Integer> list = new ArrayList<>();
                 try (ResourceIterator<Node> nodes = mService.findNodes(NON_ABSTRACT)) {
                     while (nodes.hasNext()) {
-                        list.add((int) nodes.next().getProperty(Records.ClassRecord.ID));
+                        long id = (Long) nodes.next().getProperty(Records.ClassRecord.ID);
+                        list.add((int) id);
                     }
                 }
-                Long id = (long)getMinMissingInt(list);
+                Long id = (long) getMinMissingInt(list);
                 node.setProperty(Records.ClassRecord.ID, id);
                 classRecord.id = id;
                 node.addLabel(NON_ABSTRACT);
             }
+            tx.success();
+        }
+        return Stream.of(classRecord);
+    }
+
+    @Procedure(name = "dbf.deleteComposite", mode = Mode.WRITE)
+    public void deleteComposite(@Name("nodeId") Long nodeId) {
+        try (Transaction tx = mService.beginTx()) {
+            Node node = mService.getNodeById(nodeId);
+            if (!node.hasLabel(NodeLabel.CLASS) && !node.hasLabel(NodeLabel.STRUCT)) {
+                throw new IllegalArgumentException("Only class type or struct can be deleted");
+            }
+            if (node.hasRelationship(Direction.INCOMING)) {
+                throw new IllegalArgumentException("There are references to this composite exist");
+            }
+            Node initList = getInitList(node);
+            for (Relationship relationship : node.getRelationships(Direction.OUTGOING)) {
+                relationship.delete();
+            }
+            node.delete();
+            initList.delete();
             tx.success();
         }
         return Stream.of(classRecord);
@@ -113,5 +157,161 @@ public class DiffbuffersProcedures {
             }
         }
         return list.size();
+    }
+
+    @Procedure(name = "dbf.addField", mode = Mode.WRITE)
+    public void addField(@Name("nodeId") Long nodeId,
+                         @Name("type") Long type,
+                         @Name(value = "counts", defaultValue = "0") Long counts,
+                         @Name("name") String name,
+                         @Name(value = "defaultValue", defaultValue = "") String defaultValue) {
+        Node fieldNode = mService.getNodeById(type);
+        NodeRelationship relationType = null;
+        for (NodeLabel label : NodeRelationship.getFieldTypes()) {
+            if (fieldNode.hasLabel(label)) {
+                relationType = getFieldRelationByType(label);
+            }
+        }
+        if (relationType == null)
+            throw new IllegalArgumentException("invalid type " + fieldNode.getProperty(Records.FieldRelationship.NAME));
+
+        Node node = mService.getNodeById(nodeId);
+        if (!isUniqueInComposite(name, node))
+            throw new IllegalArgumentException(name + "has already defined in this class");
+
+        HashSet<Integer> fieldSet = new HashSet<>();
+        if (node.hasLabel(NodeLabel.STRUCT)) {
+            if (relationType.equals(NodeRelationship.HAS_A_STRUCT)
+                    || relationType.equals(NodeRelationship.HAS_SOME)
+                    || relationType.equals(NodeRelationship.REFERENCES_TO)) {
+                throw new IllegalArgumentException(relationType + "is not allowed in struct");
+            }
+            if (counts != 0) {
+                throw new IllegalArgumentException("array is not allowed in struct");
+            }
+            for (Relationship relationship
+                    : node.getRelationships(Direction.OUTGOING, NodeRelationship.getFieldRelationships())) {
+                int id = (int) relationship.getProperty(Records.FieldRelationship.FIELD_ID);
+                fieldSet.add(id);
+            }
+        } else if (node.hasLabel(NodeLabel.CLASS)) {
+            // get the subtree of the node and calculate the field id
+            Traverser traverserUp = mService.traversalDescription().depthFirst()
+                    .relationships(NodeRelationship.IS_A, Direction.OUTGOING)
+                    .evaluator(Evaluators.all()).traverse(node);
+            for (Path path : traverserUp) {
+                for (Relationship relationship : path.endNode()
+                        .getRelationships(Direction.OUTGOING, NodeRelationship.getFieldRelationships())) {
+                    int id = (int) relationship.getProperty(Records.FieldRelationship.FIELD_ID);
+                    fieldSet.add(id);
+                }
+            }
+            Traverser traverserDown = mService.traversalDescription().depthFirst()
+                    .relationships(NodeRelationship.IS_A, Direction.INCOMING)
+                    .evaluator(Evaluators.excludeStartPosition()).traverse(node);
+            for (Path path : traverserDown) {
+                for (Relationship relationship : path.endNode()
+                        .getRelationships(Direction.OUTGOING, NodeRelationship.getFieldRelationships())) {
+                    int id = (int) relationship.getProperty(Records.FieldRelationship.FIELD_ID);
+                    fieldSet.add(id);
+                }
+            }
+        } else {
+            throw new IllegalArgumentException("node id: " + nodeId + "is not a class or struct");
+        }
+
+        int id = getMinMissingInt(new ArrayList<>(fieldSet));
+        try (Transaction tx = mService.beginTx()) {
+            Relationship relationship = node.createRelationshipTo(fieldNode, relationType);
+            relationship.setProperty(Records.FieldRelationship.NAME, name);
+            relationship.setProperty(Records.FieldRelationship.FIELD_ID, id);
+            relationship.setProperty(Records.FieldRelationship.COUNTS, counts);
+            if (node.hasLabel(NodeLabel.CLASS)) {
+                getInitList(node).setProperty("" + relationship.getId(), defaultValue);
+            }
+            tx.success();
+        }
+    }
+
+    @Procedure(name = "dbf.removeField", mode = Mode.WRITE)
+    public void removeField(@Name("RelationshipId") Long id) {
+        Relationship relationship = mService.getRelationshipById(id);
+        if (!isAFieldRelationType(relationship)) {
+            throw new IllegalArgumentException(id + "is not a field type relationship");
+        }
+        Node node = relationship.getStartNode();
+        if (node.hasLabel(NodeLabel.STRUCT)) {
+            try (Transaction tx = mService.beginTx()) {
+                relationship.delete();
+                tx.success();
+            }
+        } else if (node.hasLabel(NodeLabel.CLASS)) {
+            
+
+        } else throw new IllegalStateException("the start node of the relationship is not a class or struct, weird.");
+    }
+
+    private boolean isUniqueInSpace(String name, Node space) {
+        for (Relationship relationship : space.getRelationships(Direction.INCOMING, NodeRelationship.BELONGS_TO)) {
+            Node node = relationship.getStartNode();
+            if (node.hasLabel(NodeLabel.CLASS) && name.equals(node.getProperty(Records.ClassRecord.NAME))
+                    || (node.hasLabel(NodeLabel.STRUCT) && name.equals(node.getProperty(Records.StructRecord.NAME)))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isUniqueInComposite(String name, Node composite) {
+        for (Relationship relationship : composite.getRelationships(Direction.OUTGOING,
+                NodeRelationship.getFieldRelationships())) {
+            if (name.equals(relationship.getProperty(Records.FieldRelationship.NAME))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static int getMinMissingInt(ArrayList<Integer> list) {
+        for (int i = 1; i < list.size(); i++) {
+            int t = list.get(i);
+            while (t < list.size() - 1 && t != list.get(t)) {
+                int tmp = list.get(t);
+                list.set(t, t);
+                t = tmp;
+            }
+        }
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i) != i) {
+                return i;
+            }
+        }
+        return list.size();
+    }
+
+    private Node getInitList(Node node) {
+        return node.getSingleRelationship(NodeRelationship.HAS_CONSTRUCTOR_ARGS, Direction.OUTGOING).getEndNode();
+    }
+
+    private Relationship getFieldById(Node node, Long id) {
+        if (node.hasLabel(NodeLabel.CLASS) || node.hasLabel(NodeLabel.STRUCT)) {
+            for (Relationship r : node.getRelationships(Direction.OUTGOING, NodeRelationship.getFieldRelationships())) {
+                if (id.equals(r.getProperty(Records.FieldRelationship.FIELD_ID))) {
+                    return r;
+                }
+            }
+            return null;
+        } else {
+            throw new IllegalArgumentException(node.getId() + "must be a struct or class");
+        }
+    }
+
+    private boolean isAFieldRelationType(Relationship relationship) {
+        for (RelationshipType type : NodeRelationship.getFieldRelationships()) {
+            if (type.equals(relationship.getType())) {
+                return true;
+            }
+        }
+        return false;
     }
 }
