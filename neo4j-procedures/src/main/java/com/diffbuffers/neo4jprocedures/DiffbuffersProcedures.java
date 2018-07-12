@@ -1,5 +1,6 @@
 package com.diffbuffers.neo4jprocedures;
 
+import org.neo4j.cypher.internal.frontend.v2_3.ast.functions.E;
 import org.neo4j.graphdb.*;
 import org.neo4j.graphdb.schema.Schema;
 import org.neo4j.graphdb.traversal.Evaluators;
@@ -134,36 +135,16 @@ public class DiffbuffersProcedures {
             node.delete();
             initList.delete();
             tx.success();
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-        return Stream.of(classRecord);
-    }
-
-    private boolean isUniqeInSpace(String name, Node space) {
-        mService.traversalDescription().breadthFirst()
-    }
-
-    public static int getMinMissingInt(ArrayList<Integer> list) {
-        for (int i = 1; i < list.size(); i++) {
-            int t = list.get(i);
-            while (t < list.size() - 1 && t != list.get(t)) {
-                int tmp = list.get(t);
-                list.set(t, t);
-                t = tmp;
-            }
-        }
-        for (int i = 0; i < list.size(); i++) {
-            if (list.get(i) != i) {
-                return i;
-            }
-        }
-        return list.size();
     }
 
     @Procedure(name = "dbf.addField", mode = Mode.WRITE)
     public void addField(@Name("nodeId") Long nodeId,
                          @Name("type") Long type,
-                         @Name(value = "counts", defaultValue = "0") Long counts,
                          @Name("name") String name,
+                         @Name(value = "counts", defaultValue = "0") Long counts,
                          @Name(value = "defaultValue", defaultValue = "") String defaultValue) {
         Node fieldNode = mService.getNodeById(type);
         NodeRelationship relationType = null;
