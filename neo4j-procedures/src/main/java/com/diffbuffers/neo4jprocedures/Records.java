@@ -3,6 +3,8 @@ package com.diffbuffers.neo4jprocedures;
 public class Records {
     // Notice: all field name should be the same with the static final string
     public static class ClassRecord {
+        public static final String NODE_ID = "nodeId";
+        public Long nodeId;
         public static final String NAME = "name";
         public String name;
         public static final String ID = "id";
@@ -10,11 +12,15 @@ public class Records {
     }
 
     public static class NameSpaceRecord {
+        public static final String NODE_ID = "nodeId";
+        public Long nodeId;
         public static final String NAME = "name";
         public String name;
     }
 
     public static class StructRecord {
+        public static final String NODE_ID = "nodeId";
+        public Long nodeId;
         public static final String NAME = "name";
         public String name;
     }

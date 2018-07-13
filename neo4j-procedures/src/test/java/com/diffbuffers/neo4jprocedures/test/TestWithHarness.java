@@ -42,15 +42,16 @@ public class TestWithHarness {
                 Record record = tx.run("CALL dbf.createClass({name}, {parent}, {namespace})",
                         parameters("name", "TestClass",
                                 "parent", parent, "namespace", space)).single();
-//                tx.run("CALL dbf.createClass({name}, {parent}, {namespace})",
-//                        parameters("name", "TestClass2",
-//                                "parent", record.get("nodeId"), "namespace", space));
-
-                tx.run("CALL dbf.deleteComposite({nodeId})", parameters("nodeId", record.get("nodeId")));
-                tx.success();
                 for (String key : record.asMap().keySet()) {
                     System.out.println(key + ":" + record.get(key));
                 }
+
+                tx.run("CALL dbf.createClass({name}, {parent}, {namespace})",
+                        parameters("name", "TestClass",
+                                "parent", parent, "namespace", space));
+
+//                tx.run("CALL dbf.deleteComposite({nodeId})", parameters("nodeId", record.get("nodeId")));
+                tx.success();
             }
         }
     }
