@@ -1,10 +1,10 @@
 package com.diffbuffers.neo4jprocedures.test;
 
 import com.diffbuffers.neo4jprocedures.*;
-import com.diffbuffers.neo4jprocedures.Records;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.neo4j.driver.v1.*;
+import org.neo4j.driver.v1.types.Node;
 import org.neo4j.harness.junit.Neo4jRule;
 
 import static org.junit.Assert.assertTrue;
@@ -38,6 +38,10 @@ public class TestWithHarness {
 
             try (Transaction tx = session.beginTransaction()) {
                 int parent = tx.run("MATCH (p:DEFAULT_CLASS) RETURN ID(p) as id").single().get("id").asInt();
+                Node node = tx.run("MATCH (p:DEFAULT_CLASS) RETURN p").single().get("p").asNode();
+                for (String key : node.keys()) {
+                    System.out.println(key + ":" + node.get(key));
+                }
                 int space = tx.run("MATCH (p:DEFAULT_NAMESPACE) RETURN ID(p) as id").single().get("id").asInt();
                 Record record = tx.run("CALL dbf.createClass({name}, {parent}, {namespace})",
                         parameters("name", "TestClass",
@@ -46,9 +50,9 @@ public class TestWithHarness {
                     System.out.println(key + ":" + record.get(key));
                 }
 
-                tx.run("CALL dbf.createClass({name}, {parent}, {namespace})",
-                        parameters("name", "TestClass",
-                                "parent", parent, "namespace", space));
+//                tx.run("CALL dbf.createClass({name}, {parent}, {namespace})",
+//                        parameters("name", "TestClass",
+//                                "parent", parent, "namespace", space));
 
 //                tx.run("CALL dbf.deleteComposite({nodeId})", parameters("nodeId", record.get("nodeId")));
                 tx.success();

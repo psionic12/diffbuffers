@@ -1,5 +1,9 @@
 package com.diffbuffers.neo4jprocedures;
 
+import com.diffbuffers.common.Constant;
+import com.diffbuffers.common.NodeLabel;
+import com.diffbuffers.common.NodeRelationship;
+import com.diffbuffers.common.Records;
 import org.neo4j.graphdb.*;
 import org.neo4j.graphdb.schema.Schema;
 import org.neo4j.graphdb.traversal.Evaluators;
@@ -14,8 +18,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.stream.Stream;
 
-import static com.diffbuffers.neo4jprocedures.NodeRelationship.getFieldRelationByType;
-
 public class DiffbuffersProcedures {
 
     @Context
@@ -28,15 +30,14 @@ public class DiffbuffersProcedures {
     public void initSchema() {
         try (Transaction tx = mService.beginTx()) {
             Schema schema = mService.schema();
-            schema.constraintFor(NodeLabel.NON_ABSTRACT).assertPropertyIsUnique(Records.ClassRecord.ID).create();
+            schema.constraintFor(NodeLabel.NON_ABSTRACT).assertPropertyIsUnique(Records.CompositeRecord.ID).create();
             tx.success();
             mLog.info("schema init finished");
         }
     }
 
     @Procedure(name = "dbf.init", mode = Mode.WRITE)
-    public void init(@Name(value = "defaultNamespaceName", defaultValue = "diffbuffers") String defaultNamespaceName,
-                     @Name(value = "defaultSuperClassName", defaultValue = "Entity") String defaultSuperClassName) {
+    public void init() {
         try {
             mService.getNodeById(0);
             // if there's any node exits, that means this is not a empty graph
@@ -60,12 +61,12 @@ public class DiffbuffersProcedures {
 
                 // default NAME space;
                 Node defaultNameSpace = mService.createNode(NodeLabel.NAMESPACE);
-                defaultNameSpace.setProperty(Records.NameSpaceRecord.NAME, defaultNamespaceName);
+                defaultNameSpace.setProperty(Records.NameSpaceRecord.NAME, Constant.DEFAULT_NAMESPACE);
                 defaultNameSpace.addLabel(NodeLabel.DEFAULT_NAMESPACE);
 
                 // super class for all class type
                 Node defaultSuperClass = mService.createNode(NodeLabel.CLASS);
-                defaultSuperClass.setProperty(Records.ClassRecord.NAME, defaultSuperClassName);
+                defaultSuperClass.setProperty(Records.CompositeRecord.NAME, Constant.DEFAULT_CLASS_NAME);
                 defaultSuperClass.createRelationshipTo(defaultNameSpace, NodeRelationship.BELONGS_TO);
                 defaultSuperClass.addLabel(NodeLabel.DEFAULT_CLASS);
                 defaultSuperClass.createRelationshipTo(mService.createNode(NodeLabel.INIT_LIST),
@@ -113,19 +114,37 @@ public class DiffbuffersProcedures {
         }
     }
 
-    @Procedure(name = "dbf.createStruct", mode = Mode.WRITE)
-    public Stream<Records.StructRecord> createStruct(@Name("name") String structName,
-                                                     @Name("space") Long nameSpaceId) {
-        Node space = mService.getNodeById(nameSpaceId);
+    @Procedure(name = "dbf.createEnum", mode = Mode.WRITE)
+    public Stream<Records.CompositeRecord> createEnum(@Name("name") String enumName,
+                                                      @Name("space") Long namespaceId) {
+        Node space = mService.getNodeById(namespaceId);
+        if (!isUniqueInSpace(enumName, space)) {
+            throw new IllegalArgumentException(enumName + " has already defined in name space: "
+                    + space.getProperty(Records.NameSpaceRecord.NAME));
+        }
+        Records.CompositeRecord record = new Records.CompositeRecord();
+        try (Transaction tx = mService.beginTx()) {
+            Node node = mService.createNode(NodeLabel.ENUM);
+            record.nodeId = node.getId();
+            node.setProperty(Records.CompositeRecord.NAME, enumName);
+            record.name = enumName;
+            node.createRelationshipTo(space, NodeRelationship.BELONGS_TO);
+            tx.success();
+        }
+        return Stream.of(record);
+    }
+    public Stream<Records.CompositeRecord> createStruct(@Name("name") String structName,
+                                                     @Name("space") Long namespaceId) {
+        Node space = mService.getNodeById(namespaceId);
         if (!isUniqueInSpace(structName, space)) {
             throw new IllegalArgumentException(structName + " has already defined in name space: "
                     + space.getProperty(Records.NameSpaceRecord.NAME));
         }
-        Records.StructRecord record = new Records.StructRecord();
+        Records.CompositeRecord record = new Records.CompositeRecord();
         try (Transaction tx = mService.beginTx()) {
             Node node = mService.createNode(NodeLabel.STRUCT);
             record.nodeId = node.getId();
-            node.setProperty(Records.StructRecord.NAME, structName);
+            node.setProperty(Records.CompositeRecord.NAME, structName);
             record.name = structName;
             node.createRelationshipTo(space, NodeRelationship.BELONGS_TO);
             tx.success();
@@ -134,13 +153,13 @@ public class DiffbuffersProcedures {
     }
 
     @Procedure(name = "dbf.createClass", mode = Mode.WRITE)
-    public Stream<Records.ClassRecord> createClass(@Name("name") String className,
-                                                   @Name("parent") Long superTypeId,
-                                                   @Name("space") Long nameSpaceId,
-                                                   @Name(value = "abstract", defaultValue = "false") boolean isAbstract) {
-        Records.ClassRecord classRecord = new Records.ClassRecord();
+    public Stream<Records.CompositeRecord> createClass(@Name("name") String className,
+                                                       @Name("parent") Long superTypeId,
+                                                       @Name("space") Long namespaceId,
+                                                       @Name(value = "abstract", defaultValue = "false") boolean isAbstract) {
+        Records.CompositeRecord classRecord = new Records.CompositeRecord();
         try (Transaction tx = mService.beginTx()) {
-            Node space = mService.getNodeById(nameSpaceId);
+            Node space = mService.getNodeById(namespaceId);
             Node superType = mService.getNodeById(superTypeId);
             if (!isUniqueInSpace(className, space)) {
                 throw new IllegalArgumentException(className + " has already defined in name space: "
@@ -148,7 +167,7 @@ public class DiffbuffersProcedures {
             }
             Node node = mService.createNode(NodeLabel.CLASS);
             classRecord.nodeId = node.getId();
-            node.setProperty(Records.ClassRecord.NAME, className);
+            node.setProperty(Records.CompositeRecord.NAME, className);
             classRecord.name = className;
             node.createRelationshipTo(superType, NodeRelationship.IS_A);
             node.createRelationshipTo(space, NodeRelationship.BELONGS_TO);
@@ -157,12 +176,12 @@ public class DiffbuffersProcedures {
                 ArrayList<Integer> list = new ArrayList<>();
                 try (ResourceIterator<Node> nodes = mService.findNodes(NodeLabel.NON_ABSTRACT)) {
                     while (nodes.hasNext()) {
-                        long id = (Long) nodes.next().getProperty(Records.ClassRecord.ID);
+                        long id = (Long) nodes.next().getProperty(Records.CompositeRecord.ID);
                         list.add((int) id);
                     }
                 }
                 Long id = (long) getMinMissingInt(list);
-                node.setProperty(Records.ClassRecord.ID, id);
+                node.setProperty(Records.CompositeRecord.ID, id);
                 classRecord.id = id;
                 node.addLabel(NodeLabel.NON_ABSTRACT);
             }
@@ -175,8 +194,8 @@ public class DiffbuffersProcedures {
     public void deleteComposite(@Name("nodeId") Long nodeId) {
         try (Transaction tx = mService.beginTx()) {
             Node node = mService.getNodeById(nodeId);
-            if (!node.hasLabel(NodeLabel.CLASS) && !node.hasLabel(NodeLabel.STRUCT)) {
-                throw new IllegalArgumentException("Only class type or struct can be deleted");
+            if (!node.hasLabel(NodeLabel.CLASS) && !node.hasLabel(NodeLabel.STRUCT) && !node.hasLabel(NodeLabel.ENUM)) {
+                throw new IllegalArgumentException("Only class type or struct or enum can be deleted");
             }
             if (node.hasRelationship(Direction.INCOMING)) {
                 throw new IllegalArgumentException("There are references to this composite exist");
@@ -195,17 +214,12 @@ public class DiffbuffersProcedures {
     public void addField(@Name("nodeId") Long nodeId,
                          @Name("type") Long type,
                          @Name("name") String name,
-                         @Name(value = "counts", defaultValue = "0") Long counts,
+                         @Name(value = "counts", defaultValue = "1") Long counts,
                          @Name(value = "defaultValue", defaultValue = "") String defaultValue) {
         Node fieldNode = mService.getNodeById(type);
         NodeRelationship relationType = null;
-        for (NodeLabel label : NodeRelationship.getFieldTypes()) {
-            if (fieldNode.hasLabel(label)) {
-                relationType = getFieldRelationByType(label);
-            }
-        }
-        if (relationType == null)
-            throw new IllegalArgumentException("invalid type " + fieldNode.getProperty(Records.FieldRelationship.NAME));
+
+
 
         Node node = mService.getNodeById(nodeId);
         if (!isUniqueInComposite(name, node))
@@ -213,27 +227,34 @@ public class DiffbuffersProcedures {
 
         HashSet<Integer> fieldSet = new HashSet<>();
         if (node.hasLabel(NodeLabel.STRUCT)) {
-            if (relationType.equals(NodeRelationship.HAS_A_STRUCT)
-                    || relationType.equals(NodeRelationship.HAS_SOME)
-                    || relationType.equals(NodeRelationship.REFERENCES_TO)) {
-                throw new IllegalArgumentException(relationType + "is not allowed in struct");
+            for (NodeLabel label : NodeRelationship.sStructAllowedType.keySet()) {
+                if (fieldNode.hasLabel(label)) {
+                    relationType = NodeRelationship.sStructAllowedType.get(label);
+                }
             }
+
             if (counts != 0) {
                 throw new IllegalArgumentException("array is not allowed in struct");
             }
             for (Relationship relationship
-                    : node.getRelationships(Direction.OUTGOING, NodeRelationship.getFieldRelationships())) {
+                    : node.getRelationships(Direction.OUTGOING, NodeRelationship.getRelationships(NodeRelationship.sStructAllowedType))) {
                 int id = (int) relationship.getProperty(Records.FieldRelationship.FIELD_ID);
                 fieldSet.add(id);
             }
         } else if (node.hasLabel(NodeLabel.CLASS)) {
+            for (NodeLabel label : NodeRelationship.sClassAllowedType.keySet()) {
+                if (fieldNode.hasLabel(label)) {
+                    relationType = NodeRelationship.sClassAllowedType.get(label);
+                }
+            }
+
             // get the subtree of the node and calculate the field id
             Traverser traverserUp = mService.traversalDescription().depthFirst()
                     .relationships(NodeRelationship.IS_A, Direction.OUTGOING)
                     .evaluator(Evaluators.all()).traverse(node);
             for (Path path : traverserUp) {
                 for (Relationship relationship : path.endNode()
-                        .getRelationships(Direction.OUTGOING, NodeRelationship.getFieldRelationships())) {
+                        .getRelationships(Direction.OUTGOING, NodeRelationship.getRelationships(NodeRelationship.sClassAllowedType))) {
                     int id = (int) relationship.getProperty(Records.FieldRelationship.FIELD_ID);
                     fieldSet.add(id);
                 }
@@ -243,14 +264,28 @@ public class DiffbuffersProcedures {
                     .evaluator(Evaluators.excludeStartPosition()).traverse(node);
             for (Path path : traverserDown) {
                 for (Relationship relationship : path.endNode()
-                        .getRelationships(Direction.OUTGOING, NodeRelationship.getFieldRelationships())) {
+                        .getRelationships(Direction.OUTGOING, NodeRelationship.getRelationships(NodeRelationship.sClassAllowedType))) {
                     int id = (int) relationship.getProperty(Records.FieldRelationship.FIELD_ID);
                     fieldSet.add(id);
                 }
             }
+        } else if (node.hasLabel(NodeLabel.ENUM)) {
+            for (NodeLabel label : NodeRelationship.sEnumAllowedType.keySet()) {
+                if (fieldNode.hasLabel(label)) {
+                    relationType = NodeRelationship.sEnumAllowedType.get(label);
+                }
+            }
+            for (Relationship relationship
+                    : node.getRelationships(Direction.OUTGOING, NodeRelationship.getRelationships(NodeRelationship.sEnumAllowedType))) {
+                int id = (int) relationship.getProperty(Records.FieldRelationship.FIELD_ID);
+                fieldSet.add(id);
+            }
         } else {
             throw new IllegalArgumentException("node id: " + nodeId + "is not a class or struct");
         }
+
+        if (relationType == null)
+            throw new IllegalArgumentException("invalid type " + fieldNode.getProperty(Records.FieldRelationship.NAME));
 
         int id = getMinMissingInt(new ArrayList<>(fieldSet));
         try (Transaction tx = mService.beginTx()) {
@@ -268,11 +303,8 @@ public class DiffbuffersProcedures {
     @Procedure(name = "dbf.removeField", mode = Mode.WRITE)
     public void removeField(@Name("RelationshipId") Long id) {
         Relationship relationship = mService.getRelationshipById(id);
-        if (!isAFieldRelationType(relationship)) {
-            throw new IllegalArgumentException(id + "is not a field type relationship");
-        }
         Node node = relationship.getStartNode();
-        if (node.hasLabel(NodeLabel.STRUCT)) {
+        if (node.hasLabel(NodeLabel.STRUCT) || node.hasLabel(NodeLabel.ENUM)) {
             try (Transaction tx = mService.beginTx()) {
                 relationship.delete();
                 tx.success();
@@ -291,7 +323,7 @@ public class DiffbuffersProcedures {
                 tx.success();
             }
 
-        } else throw new IllegalStateException("the start node of the relationship is not a class or struct, weird.");
+        } else throw new IllegalStateException("the start node of the relationship is not a class or struct or Enum, weird.");
     }
 
     @Procedure(name = "dbf.updateField", mode = Mode.WRITE)
@@ -313,8 +345,8 @@ public class DiffbuffersProcedures {
     private boolean isUniqueInSpace(String name, Node space) {
         for (Relationship relationship : space.getRelationships(Direction.INCOMING, NodeRelationship.BELONGS_TO)) {
             Node node = relationship.getStartNode();
-            if (node.hasLabel(NodeLabel.CLASS) && name.equals(node.getProperty(Records.ClassRecord.NAME))
-                    || (node.hasLabel(NodeLabel.STRUCT) && name.equals(node.getProperty(Records.StructRecord.NAME)))) {
+            if (node.hasLabel(NodeLabel.CLASS) && name.equals(node.getProperty(Records.CompositeRecord.NAME))
+                    || (node.hasLabel(NodeLabel.STRUCT) && name.equals(node.getProperty(Records.CompositeRecord.NAME)))) {
                 return false;
             }
         }
@@ -323,7 +355,7 @@ public class DiffbuffersProcedures {
 
     private boolean isUniqueInComposite(String name, Node composite) {
         for (Relationship relationship : composite.getRelationships(Direction.OUTGOING,
-                NodeRelationship.getFieldRelationships())) {
+                NodeRelationship.getRelationships(NodeRelationship.sClassAllowedType))) {
             if (name.equals(relationship.getProperty(Records.FieldRelationship.NAME))) {
                 return false;
             }
@@ -350,27 +382,5 @@ public class DiffbuffersProcedures {
 
     private Node getInitList(Node node) {
         return node.getSingleRelationship(NodeRelationship.HAS_CONSTRUCTOR_ARGS, Direction.OUTGOING).getEndNode();
-    }
-
-    private Relationship getFieldById(Node node, Long id) {
-        if (node.hasLabel(NodeLabel.CLASS) || node.hasLabel(NodeLabel.STRUCT)) {
-            for (Relationship r : node.getRelationships(Direction.OUTGOING, NodeRelationship.getFieldRelationships())) {
-                if (id.equals(r.getProperty(Records.FieldRelationship.FIELD_ID))) {
-                    return r;
-                }
-            }
-            return null;
-        } else {
-            throw new IllegalArgumentException(node.getId() + "must be a struct or class");
-        }
-    }
-
-    private boolean isAFieldRelationType(Relationship relationship) {
-        for (RelationshipType type : NodeRelationship.getFieldRelationships()) {
-            if (type.equals(relationship.getType())) {
-                return true;
-            }
-        }
-        return false;
     }
 }

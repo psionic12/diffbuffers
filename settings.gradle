@@ -1,2 +1,4 @@
 rootProject.name = 'diffbuffers'
 include 'neo4j-procedures'
+include 'dbfclient'
+include 'common'
